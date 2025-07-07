@@ -4,7 +4,7 @@ from app.analysis import *
 def register_routes(app):
     @app.route('/')
     def home():
-        return "Hello World"
+        return "Api Service For IPL"
 
     @app.route('/api/teams')
     def get_teams_route():
