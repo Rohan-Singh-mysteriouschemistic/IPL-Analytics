@@ -7,7 +7,7 @@ import base64
 
 # ---------------------- CONFIG ------------------------
 st.set_page_config(page_title="IPL Dashboard", layout="wide")
-API_BASE = "https://ipl-2008-2022-api.onrender.com"
+API_BASE = "https://ipl-2008-2022-api.onrender.com/api"
 
 team_logos = {
     "Mumbai Indians": "logos/MI.jpg",
