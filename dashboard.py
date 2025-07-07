@@ -67,7 +67,7 @@ def get_season_options():
 teams = get_teams()
 
 # ---------------------- SIDEBAR ------------------------
-st.sidebar.image("logos/ipl.jpeg", use_column_width=True)
+st.sidebar.image("logos/ipl.jpeg", use_container_width=True)
 st.sidebar.title("🏏 IPL Dashboard")
 st.sidebar.caption("2008 - 2022 • Stats & Visuals")
 option = st.sidebar.selectbox("📂 Select Section", [
