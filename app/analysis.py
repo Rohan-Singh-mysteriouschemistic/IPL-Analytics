@@ -1,4 +1,3 @@
-# ---------- analysis.py ----------
 import pandas as pd
 import numpy as np
 import json
@@ -8,19 +7,39 @@ from app.utils import NpEncoder
 ipl, balls = load_data()
 
 # Merging and computing BowlingTeam
-data = balls.merge(ipl, on='ID')
+data = balls.merge(ipl[['ID', 'Season', 'Team1', 'Team2', 'WinningTeam', 'Player_of_Match']], on='ID', how='left')
 data['BowlingTeam'] = data.apply(lambda row: row['Team1'] if row['BattingTeam'] == row['Team2'] else row['Team2'], axis=1)
 
-batter_data = data[balls.columns.tolist() + ['BowlingTeam', 'Player_of_Match']]
-bowler_data = batter_data.copy()
+# After merging
+required_cols = balls.columns.tolist() + ['BowlingTeam', 'Player_of_Match', 'Season']
+batter_data = data[[col for col in required_cols if col in data.columns]]
 
-bowler_data['bowler_run'] = bowler_data.apply(lambda row: 0 if row['extra_type'] in ['penalty', 'legbyes', 'byes'] else row['total_run'], axis=1)
+bowler_data = batter_data.copy()
+bowler_data['bowler_run'] = bowler_data.apply(
+    lambda row: 0 if row['extra_type'] in ['penalty', 'legbyes', 'byes'] else row['total_run'], axis=1
+)
+
+# Compute bowler wicket flag
 valid_dismissals = ['caught', 'caught and bowled', 'bowled', 'stumped', 'lbw', 'hit wicket']
-bowler_data['isBowlerWicket'] = bowler_data.apply(lambda row: row['isWicketDelivery'] if row['kind'] in valid_dismissals else 0, axis=1)
+bowler_data['isBowlerWicket'] = bowler_data.apply(
+    lambda row: row['isWicketDelivery'] if row['kind'] in valid_dismissals else 0, axis=1
+)
 
 def get_teams():
     teams = sorted(set(ipl['Team1']).union(ipl['Team2']))
     return json.dumps({"teams": teams}, cls=NpEncoder)
+
+def get_batsmen():
+    names = sorted(batter_data['batter'].unique())
+    return json.dumps({"batsmen": names}, cls=NpEncoder)
+
+def get_bowlers():
+    names = sorted(bowler_data['bowler'].unique())
+    return json.dumps({"bowlers": names}, cls=NpEncoder)
+
+def get_seasons():
+    seasons = sorted(ipl['Season'].unique())
+    return json.dumps({"seasons": seasons}, cls=NpEncoder)
 
 def team_vs_team(t1, t2):
     df = ipl[((ipl.Team1 == t1) & (ipl.Team2 == t2)) | ((ipl.Team1 == t2) & (ipl.Team2 == t1))]
@@ -55,13 +74,7 @@ def batsman_stats(name, df):
     hs = f"{match_scores.max()}" if (df[df.ID == top_id].player_out == name).any() else f"{match_scores.max()}*"
     notouts = inngs - out
     moms = df[df.Player_of_Match == name]['ID'].nunique()
-    return {'innings': inngs, 'runs': runs, 'fours': fours, 'sixes': sixes, 'avg': avg, 'strikeRate': sr, 'fifties': fifties, 'hundreds': hundreds, 'highestScore': hs, 'notOut': notouts, 'mom': moms}
-
-def batsman_record_api(name):
-    df = batter_data[batter_data.innings.isin([1, 2])]
-    record = batsman_stats(name, df)
-    vs = {t: batsman_stats(name, df[df.BowlingTeam == t]) for t in ipl.Team1.unique()}
-    return json.dumps({name: {'all': record, 'against': vs}}, cls=NpEncoder)
+    return {'innings': inngs, 'runs': runs, 'fours': fours, 'sixes': sixes, 'average': avg, 'strikeRate': sr, '50s': fifties, '100s': hundreds, 'highestScore': hs, 'notOuts': notouts, 'mom': moms}
 
 def bowler_stats(name, df):
     df = df[df.bowler == name]
@@ -81,23 +94,49 @@ def bowler_stats(name, df):
     moms = df[df.Player_of_Match == name]['ID'].nunique()
     return {'innings': inngs, 'wicket': wkts, 'economy': eco, 'average': avg, 'strikeRate': sr, 'fours': fours, 'sixes': sixes, 'best_figure': best_fig, '3+W': w3, 'mom': moms}
 
+def batsman_record_api(name):
+    df = batter_data[batter_data.innings.isin([1, 2])]
+    record = batsman_stats(name, df)
+    vs = {t: batsman_stats(name, df[df.BowlingTeam == t]) for t in ipl.Team1.unique()}
+    return json.dumps({name: {'all': record, 'against': vs}}, cls=NpEncoder)
+
 def bowler_record_api(name):
     df = bowler_data[bowler_data.innings.isin([1, 2])]
     record = bowler_stats(name, df)
     vs = {t: bowler_stats(name, df[df.BattingTeam == t]) for t in ipl.Team1.unique()}
     return json.dumps({name: {'all': record, 'against': vs}}, cls=NpEncoder)
 
-def get_batsmen():
-    names = sorted(batter_data['batter'].unique())
-    return json.dumps({"batsmen": names}, cls=NpEncoder)
+def compare_players_batting(p1, p2, season_wise=False):
+    df = batter_data[batter_data.innings.isin([1, 2])]
+    if season_wise:
+        seasons = sorted(df['Season'].unique())
+        return {
+            p1: {s: batsman_stats(p1, df[df['Season'] == s]) for s in seasons},
+            p2: {s: batsman_stats(p2, df[df['Season'] == s]) for s in seasons},
+        }
+    return {
+        p1: batsman_stats(p1, df),
+        p2: batsman_stats(p2, df),
+    }
 
-def get_bowlers():
-    names = sorted(bowler_data['bowler'].unique())
-    return json.dumps({"bowlers": names}, cls=NpEncoder)
+def compare_players_bowling(p1, p2, season_wise=False):
+    df = bowler_data[bowler_data.innings.isin([1, 2])].copy()
 
-def get_seasons():
-    seasons = sorted(ipl['Season'].unique())
-    return json.dumps({"seasons": seasons}, cls=NpEncoder)
+    # Ensure required columns exist
+    if 'Season' not in df.columns or 'bowler_run' not in df.columns:
+        raise KeyError("Required columns missing in bowler_data")
+
+    if season_wise:
+        seasons = sorted(df['Season'].dropna().unique())
+        return {
+            p1: {s: bowler_stats(p1, df[df['Season'] == s]) for s in seasons},
+            p2: {s: bowler_stats(p2, df[df['Season'] == s]) for s in seasons},
+        }
+    return {
+        p1: bowler_stats(p1, df),
+        p2: bowler_stats(p2, df),
+    }
+
 
 def get_season_stats(season):
     try:
@@ -155,27 +194,3 @@ def get_season_stats(season):
         'totalSixes': int(total_sixes),
         'totalFours': int(total_fours)
     }, cls=NpEncoder)
-
-def compare_players(player1, player2):
-    df = batter_data[batter_data.innings.isin([1, 2])]
-    player1 = player1.strip()
-    player2 = player2.strip()
-
-    def get_batsman_stats(name):
-        data = df[df['batter'] == name]
-        match_scores = data.groupby("ID")['batsman_run'].sum()
-        return {
-            'runs': int(data['batsman_run'].sum()),
-            'balls': int(len(data)),
-            'average': round(data['batsman_run'].sum() / data['player_out'].eq(name).sum(), 2) if data['player_out'].eq(name).sum() != 0 else float('inf'),
-            'strike_rate': round((data['batsman_run'].sum() / len(data)) * 100, 2) if len(data) > 0 else 0,
-            '4s': int((data['batsman_run'] == 4).sum()),
-            '6s': int((data['batsman_run'] == 6).sum()),
-            '50s': int(match_scores.between(50, 99).sum()),
-            '100s': int((match_scores >= 100).sum())
-        }
-
-    return {
-        player1: get_batsman_stats(player1),
-        player2: get_batsman_stats(player2)
-    }
